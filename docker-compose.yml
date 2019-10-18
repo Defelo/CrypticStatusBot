@@ -1,0 +1,8 @@
+version: '3.2'
+services:
+  status_bot:
+    container_name: cryptic-status-bot
+    image: defelo/cryptic-status-bot:latest
+    restart: always
+    environment:
+      TOKEN: '[TOKEN]'
