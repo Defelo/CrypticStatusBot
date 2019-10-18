@@ -1,0 +1,41 @@
+{
+  "servers": [
+    {
+      "channel": 634780721940135936,
+      "title": "Productive Server",
+      "frontend": "https://play.cryptic-game.net",
+      "socket": "wss://ws.cryptic-game.net",
+      "username": "super",
+      "password": "Super1234#",
+      "microservices": {
+        "unknown service": [
+          "device",
+          "service"
+        ],
+        "unknown_service": [
+          "currency"
+        ]
+      }
+    },
+    {
+      "channel": 634780762658439170,
+      "title": "Test Server",
+      "frontend": "https://play.test.cryptic-game.net",
+      "socket": "wss://ws.test.cryptic-game.net",
+      "username": "super",
+      "password": "Super1234#",
+      "microservices": {
+        "unknown_endpoint": [
+          "device",
+          "currency",
+          "service",
+          "inventory"
+        ],
+        "unknown service": [
+          "network"
+        ]
+      }
+    }
+  ],
+  "refresh_interval": 10
+}
