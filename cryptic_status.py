@@ -98,7 +98,7 @@ class Bot(Client):
                 embed.colour = [Color(0xFF0000), Color(0xFFFF00), Color(0x008800)][server_running + all_up]
                 if not all_up:
                     channels_failed.add(message.channel.id)
-                embed.set_footer(text="last updated: " + datetime.datetime.utcnow().ctime() + " (utc)")
+                embed.set_footer(text="last updated: " + datetime.datetime.now().ctime())
 
                 await message.edit(embed=embed)
 
