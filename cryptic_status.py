@@ -44,7 +44,7 @@ class CrypticClient:
 
     def check_microservice(self, ms: str, expected: str) -> bool:
         response: Optional[dict] = self.request({"ms": ms, "endpoint": [], "data": {}, "tag": str(uuid())})
-        print(ms, expected, response)
+        # print(ms, expected, response)
         return response is not None and response.get("data", {}).get("error") == expected
 
     def close(self):
@@ -74,7 +74,7 @@ class Bot(Client):
         while True:
             channels_failed: Set[int] = set()
             for server, message in zip(servers, self.status_messages):
-                print(server)
+                # print(server)
                 embed: Embed = Embed(
                     title=f"**{server['title']} - Microservice Status**", description=f"Server: {server['socket']}"
                 )
