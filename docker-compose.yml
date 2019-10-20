@@ -4,5 +4,7 @@ services:
     container_name: cryptic-status-bot
     image: defelo/cryptic-status-bot:latest
     restart: always
+    volumes:
+      - ./config.json:/app/config.json:ro
     environment:
       TOKEN: '[TOKEN]'
