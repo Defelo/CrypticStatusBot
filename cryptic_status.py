@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import os
+import re
 from _ssl import SSLCertVerificationError
 from typing import Optional, List, Dict, Set
 from uuid import uuid4 as uuid
@@ -139,7 +140,7 @@ class Bot(Client):
                 if server_running:
                     online_count: Optional[int] = client.request({"action": "info"}).get("online")
                     if online_count is not None:
-                        embed.description += f"\nOnline players: {online_count - 1}"
+                        embed.description += f"\nOnline Players: {online_count - 1}"
 
                 client.close()
 
@@ -151,11 +152,14 @@ class Bot(Client):
 
                 channel: TextChannel = message.channel
 
+                old_channel_name: str = re.match(r"^.*?([a-z0-9]*)$", channel.name).group(1)
                 up_indicator: str = CHANNEL_CHAR[all_up]
-                new_channel_name: str = f"{up_indicator} {server['channel_name']}"
+                new_channel_name: str = f"{up_indicator} {old_channel_name}"
+                new_channel_topic: str = f"Status of {server['title']}"
                 if server_running and online_count is not None:
-                    new_channel_name += f" {DOT} {online_count - 1} online"
-                await channel.edit(name=space_channel_name(new_channel_name))
+                    new_channel_topic += f" {DOT} Online Players: {online_count - 1}"
+
+                await channel.edit(name=space_channel_name(new_channel_name), topic=new_channel_topic)
 
             await asyncio.sleep(config["refresh_interval"])
 
