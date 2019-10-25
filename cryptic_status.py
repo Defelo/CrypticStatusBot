@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import re
+import time
 from _ssl import SSLCertVerificationError
 from typing import Optional, List, Dict, Set
 from uuid import uuid4 as uuid
@@ -36,6 +37,14 @@ class Server:
         self.microservices: Dict[str, List[str]] = microservices
 
         self.status_message: Optional[Message] = None
+        self.ms_down_since: Dict[str, Optional[float]] = {
+            **{"cryptic-" + name: None for ms in microservices.values() for name in ms},
+            "server": None,
+        }
+        self.ms_down_message: Dict[str, Optional[Message]] = {
+            **{"cryptic-" + name: None for ms in microservices.values() for name in ms},
+            "server": None,
+        }
 
     @staticmethod
     def deserialize(data: dict) -> "Server":
@@ -106,9 +115,6 @@ class CrypticClient:
 
 
 class Bot(Client):
-    def __init__(self):
-        super().__init__()
-
     async def on_message_delete(self, msg: Message):
         if msg.author != self.user:
             return
@@ -116,6 +122,10 @@ class Bot(Client):
         for server in servers:
             if server.status_message.id == msg.id:
                 break
+            for ms, down_message in server.ms_down_message.items():
+                if down_message is not None and down_message.id == msg.id:
+                    server.ms_down_message[ms] = await msg.channel.send(down_message.content)
+                    return
         else:
             return
 
@@ -137,6 +147,23 @@ class Bot(Client):
 
         await msg.delete()
 
+    @staticmethod
+    async def microservice_status(server: Server, ms_running: bool, ms: str):
+        if server.ms_down_since[ms] is not None:
+            time_passed: float = time.time() - server.ms_down_since[ms]
+            if ms_running:
+                server.ms_down_since[ms] = None
+                if server.ms_down_message[ms] is not None:
+                    msg: Message = server.ms_down_message[ms]
+                    server.ms_down_message[ms] = None
+                    await msg.delete()
+            elif time_passed > 30 and server.ms_down_message[ms] is None:
+                server.ms_down_message[ms] = await server.status_message.channel.send(
+                    f":warning: The {[ms + ' microservice', 'java server'][ms == 'server']} seems to be down!"
+                )
+        elif not ms_running:
+            server.ms_down_since[ms] = time.time()
+
     async def on_ready(self):
         print(f"Logged in as {self.user}")
 
@@ -154,10 +181,13 @@ class Bot(Client):
                 if server.frontend is not None:
                     embed.description += f"\nFrontend: {server.frontend}"
 
+                channel: TextChannel = server.status_message.channel
+
                 client: CrypticClient = CrypticClient(server)
 
                 server_running: bool = client.check_java_server()
                 embed.add_field(name="**Java Server**", value=RESULT[server_running], inline=False)
+                await Bot.microservice_status(server, server_running, "server")
 
                 all_up: bool = server_running
 
@@ -166,6 +196,9 @@ class Bot(Client):
                         ms_running: bool = server_running and client.check_microservice(ms, expected)
                         embed.add_field(name=f"**cryptic-{ms}**", value=RESULT[ms_running], inline=False)
                         all_up: bool = all_up and ms_running
+
+                        if server_running:
+                            await Bot.microservice_status(server, ms_running, "cryptic-" + ms)
 
                 online_count: Optional[int] = None
                 if server_running:
@@ -180,8 +213,6 @@ class Bot(Client):
                 embed.timestamp = datetime.datetime.utcnow()
 
                 await server.status_message.edit(embed=embed)
-
-                channel: TextChannel = server.status_message.channel
 
                 old_channel_name: str = re.match(r"^.*?([a-z0-9]*)$", channel.name).group(1)
                 up_indicator: str = CHANNEL_CHAR[all_up]
