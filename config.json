@@ -2,6 +2,7 @@
   "servers": [
     {
       "channel": 634780721940135936,
+      "channel_name": "productive",
       "title": "Productive Server",
       "frontend": "https://play.cryptic-game.net",
       "socket": "wss://ws.cryptic-game.net",
@@ -19,6 +20,7 @@
     },
     {
       "channel": 634780762658439170,
+      "channel_name": "test",
       "title": "Test Server",
       "frontend": "https://play.test.cryptic-game.net",
       "socket": "wss://ws.test.cryptic-game.net",

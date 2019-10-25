@@ -11,9 +11,26 @@ from websocket import WebSocket, create_connection, WebSocketTimeoutException, W
 
 RESULT = [":x: Down", ":white_check_mark: Running"]
 CHANNEL_CHAR = ["✘", "✔"]
+SPACE = "\u2009" * 2
+DOT = "\u00b7"
 
 config = json.load(open("config.json"))
 servers = config["servers"]
+
+
+def validate_config():
+    occupied_channels: Set[int] = set()
+    for server in servers:
+        channel: int = server["channel"]
+        assert channel not in occupied_channels, "channel is already occupied"
+        occupied_channels.add(channel)
+
+
+def space_channel_name(name: str) -> str:
+    return name.replace(" ", SPACE)
+
+
+validate_config()
 
 
 class CrypticClient:
@@ -59,6 +76,31 @@ class Bot(Client):
 
         self.status_messages: List[Message] = []
 
+    async def on_message_delete(self, msg: Message):
+        if msg.author != self.user:
+            return
+
+        for idx, message in enumerate(self.status_messages):
+            if message.id == msg.id:
+                break
+        else:
+            return
+
+        self.status_messages[idx] = await message.channel.send(embed=message.embeds[0])
+
+    async def on_message(self, msg: Message):
+        if msg.author == self.user:
+            return
+
+        for message in self.status_messages:
+            channel: TextChannel = message.channel
+            if msg.channel.id == channel.id:
+                break
+        else:
+            return
+
+        await msg.delete()
+
     async def on_ready(self):
         print(f"Logged in as {self.user}")
 
@@ -72,7 +114,6 @@ class Bot(Client):
             self.status_messages.append(await status_channels[channel_id].send(embed=Embed(title=server["title"])))
 
         while True:
-            channels_failed: Set[int] = set()
             for server, message in zip(servers, self.status_messages):
                 # print(server)
                 embed: Embed = Embed(
@@ -93,19 +134,28 @@ class Bot(Client):
                         ms_running: bool = server_running and client.check_microservice(ms, expected)
                         embed.add_field(name=f"**cryptic-{ms}**", value=RESULT[ms_running], inline=False)
                         all_up: bool = all_up and ms_running
+
+                online_count: Optional[int] = None
+                if server_running:
+                    online_count: Optional[int] = client.request({"action": "info"}).get("online")
+                    if online_count is not None:
+                        embed.description += f"\nOnline players: {online_count - 1}"
+
                 client.close()
 
                 embed.colour = [Color(0xFF0000), Color(0xFFFF00), Color(0x008800)][server_running + all_up]
-                if not all_up:
-                    channels_failed.add(message.channel.id)
                 embed.set_footer(text="Bot by @Defelo#2022")
                 embed.timestamp = datetime.datetime.utcnow()
 
                 await message.edit(embed=embed)
 
-            for channel_id, channel in status_channels.items():
-                old_name: str = channel.name.split("-")[-1]
-                await channel.edit(name=CHANNEL_CHAR[channel_id not in channels_failed] + "-" + old_name)
+                channel: TextChannel = message.channel
+
+                up_indicator: str = CHANNEL_CHAR[all_up]
+                new_channel_name: str = f"{up_indicator} {server['channel_name']}"
+                if server_running and online_count is not None:
+                    new_channel_name += f" {DOT} {online_count - 1} online"
+                await channel.edit(name=space_channel_name(new_channel_name))
 
             await asyncio.sleep(config["refresh_interval"])
 
