@@ -15,16 +15,50 @@ CHANNEL_CHAR = ["✘", "✔"]
 SPACE = "\u2009" * 2
 DOT = "\u00b7"
 
-config = json.load(open("config.json"))
-servers = config["servers"]
+
+class Server:
+    def __init__(
+        self,
+        channel_id: int,
+        title: str,
+        frontend: Optional[str],
+        socket: str,
+        username: str,
+        password: str,
+        microservices: Dict[str, List[str]],
+    ):
+        self.channel_id: int = channel_id
+        self.title: str = title
+        self.frontend: Optional[str] = frontend
+        self.socket: str = socket
+        self.username: str = username
+        self.password: str = password
+        self.microservices: Dict[str, List[str]] = microservices
+
+        self.status_message: Optional[Message] = None
+
+    @staticmethod
+    def deserialize(data: dict) -> "Server":
+        return Server(
+            data.get("channel"),
+            data.get("title"),
+            data.get("frontend"),
+            data.get("socket"),
+            data.get("username"),
+            data.get("password"),
+            data.get("microservices"),
+        )
+
+
+config: dict = json.load(open("config.json"))
+servers: List[Server] = [Server.deserialize(server) for server in config["servers"]]
 
 
 def validate_config():
     occupied_channels: Set[int] = set()
     for server in servers:
-        channel: int = server["channel"]
-        assert channel not in occupied_channels, "channel is already occupied"
-        occupied_channels.add(channel)
+        assert server.channel_id not in occupied_channels, "channel is already occupied"
+        occupied_channels.add(server.channel_id)
 
 
 def space_channel_name(name: str) -> str:
@@ -35,10 +69,10 @@ validate_config()
 
 
 class CrypticClient:
-    def __init__(self, server: dict):
-        self.server: dict = server
+    def __init__(self, server: Server):
+        self.server: Server = server
         try:
-            self.ws: WebSocket = create_connection(server["socket"])
+            self.ws: WebSocket = create_connection(server.socket)
         except (ConnectionRefusedError, ConnectionResetError, WebSocketException, SSLCertVerificationError):
             self.ws: Optional[WebSocket] = None
         else:
@@ -56,7 +90,7 @@ class CrypticClient:
         if self.ws is None:
             return False
         response: Optional[dict] = self.request(
-            {"action": "login", "name": self.server["username"], "password": self.server["password"]}
+            {"action": "login", "name": self.server.username, "password": self.server.password}
         )
         return response is not None and "token" in response
 
@@ -75,27 +109,28 @@ class Bot(Client):
     def __init__(self):
         super().__init__()
 
-        self.status_messages: List[Message] = []
-
     async def on_message_delete(self, msg: Message):
         if msg.author != self.user:
             return
 
-        for idx, message in enumerate(self.status_messages):
-            if message.id == msg.id:
+        for server in servers:
+            if server.status_message.id == msg.id:
                 break
         else:
             return
 
-        self.status_messages[idx] = await message.channel.send(embed=message.embeds[0])
+        if server.status_message.embeds:
+            embed: Embed = server.status_message.embeds[0]
+        else:
+            embed: Embed = Embed(title=server.title)
+        server.status_message = await server.status_message.channel.send(embed=embed)
 
     async def on_message(self, msg: Message):
         if msg.author == self.user:
             return
 
-        for message in self.status_messages:
-            channel: TextChannel = message.channel
-            if msg.channel.id == channel.id:
+        for server in servers:
+            if msg.channel.id == server.channel_id:
                 break
         else:
             return
@@ -105,23 +140,19 @@ class Bot(Client):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
 
-        status_channels: Dict[int, TextChannel] = {}
-
         for server in servers:
-            channel_id: int = server["channel"]
-            if channel_id not in status_channels:
-                status_channels[channel_id] = self.get_channel(channel_id)
-                await status_channels[channel_id].purge(limit=None)
-            self.status_messages.append(await status_channels[channel_id].send(embed=Embed(title=server["title"])))
+            channel: TextChannel = self.get_channel(server.channel_id)
+            await channel.purge(limit=None)
+            server.status_message = await channel.send(embed=Embed(title=server.title))
 
         while True:
-            for server, message in zip(servers, self.status_messages):
+            for server in servers:
                 # print(server)
                 embed: Embed = Embed(
-                    title=f"**{server['title']} - Microservice Status**", description=f"Server: {server['socket']}"
+                    title=f"**{server.title} - Microservice Status**", description=f"Server: {server.socket}"
                 )
-                if "frontend" in server:
-                    embed.description += f"\nFrontend: {server['frontend']}"
+                if server.frontend is not None:
+                    embed.description += f"\nFrontend: {server.frontend}"
 
                 client: CrypticClient = CrypticClient(server)
 
@@ -130,7 +161,7 @@ class Bot(Client):
 
                 all_up: bool = server_running
 
-                for expected, microservices in server["microservices"].items():
+                for expected, microservices in server.microservices.items():
                     for ms in microservices:
                         ms_running: bool = server_running and client.check_microservice(ms, expected)
                         embed.add_field(name=f"**cryptic-{ms}**", value=RESULT[ms_running], inline=False)
@@ -148,14 +179,14 @@ class Bot(Client):
                 embed.set_footer(text="Bot by @Defelo#2022")
                 embed.timestamp = datetime.datetime.utcnow()
 
-                await message.edit(embed=embed)
+                await server.status_message.edit(embed=embed)
 
-                channel: TextChannel = message.channel
+                channel: TextChannel = server.status_message.channel
 
                 old_channel_name: str = re.match(r"^.*?([a-z0-9]*)$", channel.name).group(1)
                 up_indicator: str = CHANNEL_CHAR[all_up]
                 new_channel_name: str = f"{up_indicator} {old_channel_name}"
-                new_channel_topic: str = f"Status of {server['title']}"
+                new_channel_topic: str = f"Status of {server.title}"
                 if server_running and online_count is not None:
                     new_channel_topic += f" {DOT} Online Players: {online_count - 1}"
 
