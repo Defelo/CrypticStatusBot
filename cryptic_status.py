@@ -167,12 +167,15 @@ class Bot(Client):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
 
+    async def main_loop(self):
+        await self.wait_until_ready()
+
         for server in servers:
             channel: TextChannel = self.get_channel(server.channel_id)
             await channel.purge(limit=None)
             server.status_message = await channel.send(embed=Embed(title=server.title))
 
-        while True:
+        while not self.is_closed():
             for server in servers:
                 # print(server)
                 embed: Embed = Embed(
@@ -226,4 +229,6 @@ class Bot(Client):
             await asyncio.sleep(config["refresh_interval"])
 
 
-Bot().run(os.environ["TOKEN"])
+bot: Bot = Bot()
+bot.loop.create_task(bot.main_loop())
+bot.run(os.environ["TOKEN"])
