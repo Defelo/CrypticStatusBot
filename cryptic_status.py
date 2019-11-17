@@ -222,7 +222,7 @@ class Bot(Client):
                 client.close()
 
                 embed.colour = [Color(0xFF0000), Color(0xFFFF00), Color(0x008800)][server_running + all_up]
-                embed.set_footer(text="Bot by @Defelo#2022")
+                embed.set_footer(text="v1.0 - Bot by @Defelo#2022")
                 embed.timestamp = datetime.datetime.utcnow()
 
                 await server.status_message.edit(embed=embed)
