@@ -1,4 +1,4 @@
-FROM python:3.7-alpine
+FROM python:3.8-alpine
 
 WORKDIR /app
 
@@ -10,6 +10,5 @@ ADD Pipfile.lock /app/
 RUN pipenv sync
 
 ADD cryptic_status.py /app/
-ADD config.json /app/
 
 CMD pipenv run main

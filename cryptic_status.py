@@ -172,8 +172,18 @@ class Bot(Client):
 
         for server in servers:
             channel: TextChannel = self.get_channel(server.channel_id)
-            await channel.purge(limit=None)
-            server.status_message = await channel.send(embed=Embed(title=server.title))
+
+            def check(msg: Message) -> bool:
+                if server.status_message is not None or msg.author != self.user:
+                    return True
+                server.status_message = msg
+                return False
+
+            await channel.purge(limit=None, check=check)
+            if server.status_message:
+                await server.status_message.edit(content="", embed=Embed(title=server.title))
+            else:
+                server.status_message = await channel.send(embed=Embed(title=server.title))
 
         while not self.is_closed():
             for server in servers:

@@ -10,7 +10,7 @@ discord-py = "*"
 websocket-client = "*"
 
 [requires]
-python_version = "3.7"
+python_version = "3.8"
 
 [scripts]
 main = "python cryptic_status.py"
