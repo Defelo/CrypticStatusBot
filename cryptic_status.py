@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 import json
 import os
@@ -9,6 +8,7 @@ from typing import Optional, List, Dict, Set
 from uuid import uuid4 as uuid
 
 from discord import Client, Message, TextChannel, Embed, Color
+from discord.ext import tasks
 from websocket import WebSocket, create_connection, WebSocketTimeoutException, WebSocketException
 
 RESULT = [":x: Down", ":white_check_mark: Running"]
@@ -167,8 +167,7 @@ class Bot(Client):
     async def on_ready(self):
         print(f"Logged in as {self.user}")
 
-    async def main_loop(self):
-        await self.wait_until_ready()
+        self.main_loop.cancel()
 
         for server in servers:
             channel: TextChannel = self.get_channel(server.channel_id)
@@ -179,66 +178,68 @@ class Bot(Client):
                 server.status_message = msg
                 return False
 
+            server.status_message = None
             await channel.purge(limit=None, check=check)
             if server.status_message:
                 await server.status_message.edit(content="", embed=Embed(title=server.title))
             else:
                 server.status_message = await channel.send(embed=Embed(title=server.title))
 
-        while not self.is_closed():
-            for server in servers:
-                # print(server)
-                embed: Embed = Embed(
-                    title=f"**{server.title} - Microservice Status**", description=f"Server: {server.socket}"
-                )
-                if server.frontend is not None:
-                    embed.description += f"\nFrontend: {server.frontend}"
+        self.main_loop.start()
 
-                channel: TextChannel = server.status_message.channel
+    # noinspection PyCallingNonCallable
+    @tasks.loop(seconds=config["refresh_interval"])
+    async def main_loop(self):
+        for server in servers:
+            # print(server)
+            embed: Embed = Embed(
+                title=f"**{server.title} - Microservice Status**", description=f"Server: {server.socket}"
+            )
+            if server.frontend is not None:
+                embed.description += f"\nFrontend: {server.frontend}"
 
-                client: CrypticClient = CrypticClient(server)
+            channel: TextChannel = server.status_message.channel
 
-                server_running: bool = client.check_java_server()
-                embed.add_field(name="**Java Server**", value=RESULT[server_running], inline=False)
-                await Bot.microservice_status(server, server_running, "server")
+            client: CrypticClient = CrypticClient(server)
 
-                all_up: bool = server_running
+            server_running: bool = client.check_java_server()
+            embed.add_field(name="**Java Server**", value=RESULT[server_running], inline=False)
+            await Bot.microservice_status(server, server_running, "server")
 
-                for expected, microservices in server.microservices.items():
-                    for ms in microservices:
-                        ms_running: bool = server_running and client.check_microservice(ms, expected)
-                        embed.add_field(name=f"**cryptic-{ms}**", value=RESULT[ms_running], inline=False)
-                        all_up: bool = all_up and ms_running
+            all_up: bool = server_running
 
-                        if server_running:
-                            await Bot.microservice_status(server, ms_running, "cryptic-" + ms)
+            for expected, microservices in server.microservices.items():
+                for ms in microservices:
+                    ms_running: bool = server_running and client.check_microservice(ms, expected)
+                    embed.add_field(name=f"**cryptic-{ms}**", value=RESULT[ms_running], inline=False)
+                    all_up: bool = all_up and ms_running
 
-                online_count: Optional[int] = None
-                if server_running:
-                    online_count: Optional[int] = client.request({"action": "info"}).get("online")
-                    if online_count is not None:
-                        embed.description += f"\nOnline Players: {online_count - 1}"
+                    if server_running:
+                        await Bot.microservice_status(server, ms_running, "cryptic-" + ms)
 
-                client.close()
+            online_count: Optional[int] = None
+            if server_running:
+                online_count: Optional[int] = client.request({"action": "info"}).get("online")
+                if online_count is not None:
+                    embed.description += f"\nOnline Players: {online_count - 1}"
 
-                embed.colour = [Color(0xFF0000), Color(0xFFFF00), Color(0x008800)][server_running + all_up]
-                embed.set_footer(text="v1.0 - Bot by @Defelo#2022")
-                embed.timestamp = datetime.datetime.utcnow()
+            client.close()
 
-                await server.status_message.edit(embed=embed)
+            embed.colour = [Color(0xFF0000), Color(0xFFFF00), Color(0x008800)][server_running + all_up]
+            embed.set_footer(text="v1.0 - Bot by @Defelo#2022")
+            embed.timestamp = datetime.datetime.utcnow()
 
-                old_channel_name: str = re.match(r"^.*?([a-z0-9]*)$", channel.name).group(1)
-                up_indicator: str = CHANNEL_CHAR[all_up]
-                new_channel_name: str = f"{up_indicator} {old_channel_name}"
-                new_channel_topic: str = f"Status of {server.title}"
-                if server_running and online_count is not None:
-                    new_channel_topic += f" {DOT} Online Players: {online_count - 1}"
+            await server.status_message.edit(embed=embed)
 
-                await channel.edit(name=space_channel_name(new_channel_name), topic=new_channel_topic)
+            old_channel_name: str = re.match(r"^.*?([a-z0-9]*)$", channel.name).group(1)
+            up_indicator: str = CHANNEL_CHAR[all_up]
+            new_channel_name: str = f"{up_indicator} {old_channel_name}"
+            new_channel_topic: str = f"Status of {server.title}"
+            if server_running and online_count is not None:
+                new_channel_topic += f" {DOT} Online Players: {online_count - 1}"
 
-            await asyncio.sleep(config["refresh_interval"])
+            await channel.edit(name=space_channel_name(new_channel_name), topic=new_channel_topic)
 
 
 bot: Bot = Bot()
-bot.loop.create_task(bot.main_loop())
 bot.run(os.environ["TOKEN"])
