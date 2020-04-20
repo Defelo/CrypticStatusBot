@@ -9,6 +9,8 @@ ADD Pipfile.lock /app/
 
 RUN pipenv sync
 
+ADD cryptic_client.py /app/
+ADD server.py /app/
 ADD cryptic_status.py /app/
 
 CMD pipenv run main

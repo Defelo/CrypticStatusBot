@@ -3,61 +3,18 @@ import json
 import os
 import re
 import time
-from _ssl import SSLCertVerificationError
-from typing import Optional, List, Dict, Set
-from uuid import uuid4 as uuid
+from typing import Optional, List, Set
 
 from discord import Client, Message, TextChannel, Embed, Color
 from discord.ext import tasks
-from websocket import WebSocket, create_connection, WebSocketTimeoutException, WebSocketException
+
+from cryptic_client import CrypticClient
+from server import Server
 
 RESULT = [":x: Down", ":white_check_mark: Running"]
 CHANNEL_CHAR = ["✘", "✔"]
 SPACE = "\u2009" * 2
 DOT = "\u00b7"
-
-
-class Server:
-    def __init__(
-        self,
-        channel_id: int,
-        title: str,
-        frontend: Optional[str],
-        socket: str,
-        username: str,
-        password: str,
-        microservices: Dict[str, List[str]],
-    ):
-        self.channel_id: int = channel_id
-        self.title: str = title
-        self.frontend: Optional[str] = frontend
-        self.socket: str = socket
-        self.username: str = username
-        self.password: str = password
-        self.microservices: Dict[str, List[str]] = microservices
-
-        self.status_message: Optional[Message] = None
-        self.ms_down_since: Dict[str, Optional[float]] = {
-            **{"cryptic-" + name: None for ms in microservices.values() for name in ms},
-            "server": None,
-        }
-        self.ms_down_message: Dict[str, Optional[Message]] = {
-            **{"cryptic-" + name: None for ms in microservices.values() for name in ms},
-            "server": None,
-        }
-
-    @staticmethod
-    def deserialize(data: dict) -> "Server":
-        return Server(
-            data.get("channel"),
-            data.get("title"),
-            data.get("frontend"),
-            data.get("socket"),
-            data.get("username"),
-            data.get("password"),
-            data.get("microservices"),
-        )
-
 
 config: dict = json.load(open("config.json"))
 servers: List[Server] = [Server.deserialize(server) for server in config["servers"]]
@@ -74,116 +31,43 @@ def space_channel_name(name: str) -> str:
     return name.replace(" ", SPACE)
 
 
+async def fetch_status_message(channel: TextChannel) -> Optional[Message]:
+    out = None
+    async for message in channel.history(limit=None):
+        if out is None and message.author == bot.user:
+            out = message
+        else:
+            await message.delete()
+    return out
+
+
 validate_config()
 
 
-class CrypticClient:
-    def __init__(self, server: Server):
-        self.server: Server = server
-        try:
-            self.ws: WebSocket = create_connection(server.socket)
-        except (ConnectionRefusedError, ConnectionResetError, WebSocketException, SSLCertVerificationError):
-            self.ws: Optional[WebSocket] = None
-        else:
-            self.ws.settimeout(5)
-
-    def request(self, data: dict) -> Optional[dict]:
-        for _ in range(3):
-            self.ws.send(json.dumps(data))
-            try:
-                return json.loads(self.ws.recv())
-            except WebSocketTimeoutException:
-                pass
-
-    def check_java_server(self) -> bool:
-        if self.ws is None:
-            return False
-        response: Optional[dict] = self.request(
-            {"action": "login", "name": self.server.username, "password": self.server.password}
-        )
-        return response is not None and "token" in response
-
-    def check_microservice(self, ms: str, expected: str) -> bool:
-        response: Optional[dict] = self.request({"ms": ms, "endpoint": [], "data": {}, "tag": str(uuid())})
-        # print(ms, expected, response)
-        return response is not None and response.get("data", {}).get("error") == expected
-
-    def close(self):
-        if self.ws is not None:
-            self.ws.send(json.dumps({"action": "logout"}))
-            self.ws.close()
-
-
 class Bot(Client):
-    async def on_message_delete(self, msg: Message):
-        if msg.author != self.user:
-            return
-
-        for server in servers:
-            if server.status_message.id == msg.id:
-                break
-            for ms, down_message in server.ms_down_message.items():
-                if down_message is not None and down_message.id == msg.id:
-                    server.ms_down_message[ms] = await msg.channel.send(down_message.content)
-                    return
-        else:
-            return
-
-        if server.status_message.embeds:
-            embed: Embed = server.status_message.embeds[0]
-        else:
-            embed: Embed = Embed(title=server.title)
-        server.status_message = await server.status_message.channel.send(embed=embed)
-
-    async def on_message(self, msg: Message):
-        if msg.author == self.user:
-            return
-
-        for server in servers:
-            if msg.channel.id == server.channel_id:
-                break
-        else:
-            return
-
-        await msg.delete()
-
     @staticmethod
     async def microservice_status(server: Server, ms_running: bool, ms: str):
-        if server.ms_down_since[ms] is not None:
-            time_passed: float = time.time() - server.ms_down_since[ms]
+        if ms in server.ms_down:
+            since, message_id = server.ms_down[ms]
+            time_passed: float = time.time() - since
+            channel: TextChannel = bot.get_channel(server.channel_id)
             if ms_running:
-                server.ms_down_since[ms] = None
-                if server.ms_down_message[ms] is not None:
-                    msg: Message = server.ms_down_message[ms]
-                    server.ms_down_message[ms] = None
-                    await msg.delete()
-            elif time_passed > 30 and server.ms_down_message[ms] is None:
-                server.ms_down_message[ms] = await server.status_message.channel.send(
+                server.ms_down.pop(ms)
+                message: Optional[Message] = await channel.fetch_message(message_id)
+                if message is not None:
+                    await message.delete()
+            elif time_passed > 120 and message_id is None:
+                message = await channel.send(
                     f":warning: The {[ms + ' microservice', 'java server'][ms == 'server']} seems to be down!"
                 )
+                server.ms_down[ms] = since, message.id
         elif not ms_running:
-            server.ms_down_since[ms] = time.time()
+            server.ms_down[ms] = time.time(), None
 
     async def on_ready(self):
         print(f"Logged in as {self.user}")
 
         self.main_loop.cancel()
-
-        for server in servers:
-            channel: TextChannel = self.get_channel(server.channel_id)
-
-            def check(msg: Message) -> bool:
-                if server.status_message is not None or msg.author != self.user:
-                    return True
-                server.status_message = msg
-                return False
-
-            server.status_message = None
-            await channel.purge(limit=None, check=check)
-            if server.status_message:
-                await server.status_message.edit(content="", embed=Embed(title=server.title))
-            else:
-                server.status_message = await channel.send(embed=Embed(title=server.title))
 
         self.main_loop.start()
 
@@ -198,7 +82,7 @@ class Bot(Client):
             if server.frontend is not None:
                 embed.description += f"\nFrontend: {server.frontend}"
 
-            channel: TextChannel = server.status_message.channel
+            channel: TextChannel = bot.get_channel(server.channel_id)
 
             client: CrypticClient = CrypticClient(server)
 
@@ -229,7 +113,11 @@ class Bot(Client):
             embed.set_footer(text="v1.0 - Bot by @Defelo#2022")
             embed.timestamp = datetime.datetime.utcnow()
 
-            await server.status_message.edit(embed=embed)
+            status_message: Optional[Message] = await fetch_status_message(channel)
+            if status_message is None:
+                await channel.send(embed=embed)
+            else:
+                await status_message.edit(content="", embed=embed)
 
             old_channel_name: str = re.match(r"^.*?([a-z0-9]*)$", channel.name).group(1)
             up_indicator: str = CHANNEL_CHAR[all_up]
