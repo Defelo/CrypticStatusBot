@@ -83,6 +83,8 @@ class Bot(Client):
                 embed.description += f"\nFrontend: {server.frontend}"
 
             channel: TextChannel = bot.get_channel(server.channel_id)
+            if channel is None:
+                continue
 
             client: CrypticClient = CrypticClient(server)
 
