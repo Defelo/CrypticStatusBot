@@ -3,14 +3,28 @@ import json
 import os
 import re
 import time
+import sentry_sdk
 from typing import Optional, List, Set
 
 from discord import Client, Message, TextChannel, Embed, Color
 from discord.ext import tasks
 from discord.ext.tasks import Loop
+from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 
 from cryptic_client import CrypticClient
 from server import Server
+
+VERSION = "1.2"
+
+sentry_dsn = os.environ.get("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        attach_stacktrace=True,
+        shutdown_timeout=5,
+        integrations=[AioHttpIntegration()],
+        release=f"crypticstatusbot@{VERSION}",
+    )
 
 RESULT = [":x: Down", ":white_check_mark: Running"]
 CHANNEL_CHAR = ["✘", "✔"]
@@ -118,7 +132,7 @@ async def main_loop():
         client.close()
 
         embed.colour = [Color(0xFF0000), Color(0xFFFF00), Color(0x008800)][server_running + all_up]
-        embed.set_footer(text="v1.1 - Bot by @Defelo#2022")
+        embed.set_footer(text=f"v{VERSION} - Bot by @Defelo#2022")
         embed.timestamp = datetime.datetime.utcnow()
 
         status_message: Optional[Message] = await fetch_status_message(channel)
@@ -135,6 +149,14 @@ async def main_loop():
             new_channel_topic += f" {DOT} Online Players: {online_count - 1}"
 
         await channel.edit(name=space_channel_name(new_channel_name), topic=new_channel_topic)
+
+
+@bot.event
+async def on_error(*_, **__):
+    if sentry_dsn:
+        sentry_sdk.capture_exception()
+    else:
+        raise
 
 
 bot.run(os.environ["TOKEN"])

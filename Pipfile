@@ -8,6 +8,7 @@ verify_ssl = true
 [packages]
 discord-py = "*"
 websocket-client = "*"
+sentry-sdk = "*"
 
 [requires]
 python_version = "3.8"
