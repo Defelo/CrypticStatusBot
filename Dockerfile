@@ -1,5 +1,7 @@
 FROM python:3.8-alpine
 
+RUN apk add --no-cache gcc=9.3.0-r2 musl-dev=1.1.24-r9 git=2.26.2-r0
+
 WORKDIR /app
 
 RUN pip install pipenv
